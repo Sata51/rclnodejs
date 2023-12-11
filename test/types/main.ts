@@ -110,6 +110,9 @@ node.countPublishers(TOPIC);
 // $ExpectType number
 node.countSubscribers(TOPIC);
 
+// $ExpectType Options<string | QoS>
+rclnodejs.Node.getDefaultOptions();
+
 // ---- LifecycleNode ----
 // $ExpectType LifecycleNode
 const lifecycleNode = rclnodejs.createLifecycleNode(LIFECYCLE_NODE_NAME);
@@ -198,6 +201,9 @@ publisher.publish(Buffer.from('Hello ROS World'));
 // $ExpectType void
 node.destroyPublisher(publisher);
 
+// $ExpectType boolean
+publisher.isDestroyed();
+
 // ---- LifecyclePublisher ----
 // $ExpectType LifecyclePublisher<"std_msgs/msg/String">
 const lifecyclePublisher = lifecycleNode.createLifecyclePublisher(
@@ -215,22 +221,38 @@ let subscription = node.createSubscription(TYPE_CLASS, TOPIC, (msg) => {});
 // $ExpectType Subscription
 subscription = node.createSubscription(TYPE_CLASS, TOPIC, {}, (msg) => {});
 
+const contentFilter: rclnodejs.SubscriptionContentFilter = {
+  expression: 'data < %0',
+  parameters: [5],
+};
+
+// $ExpectType Subscription
+subscription = node.createSubscription(
+  TYPE_CLASS,
+  TOPIC,
+  { contentFilter },
+  (msg) => {}
+);
+
 // $ExpectType string
 subscription.topic;
 
+// $ExpectType boolean
+subscription.isDestroyed();
+
+subscription.setContentFilter(contentFilter);
+
+// $ExpectType boolean
+subscription.clearContentFilter();
+
+// $ExpectType boolean
+subscription.hasContentFilter();
+
 // ---- Service ----
 // $ExpectType AddTwoIntsConstructor
-let service = node.createService(
+const service = node.createService(
   'example_interfaces/srv/AddTwoInts',
   'add_two_ints',
-  (request, response) => {}
-);
-
-// $ExpectType AddTwoIntsConstructor
-service = node.createService(
-  'example_interfaces/srv/AddTwoInts',
-  'add_two_ints',
-  {},
   (request, response) => {}
 );
 
@@ -239,6 +261,15 @@ service.serviceName;
 
 // $ExpectType object
 service.options;
+
+service.configureIntrospection(
+  node.getClock(),
+  rclnodejs.Node.getDefaultOptions() as rclnodejs.QoS,
+  rclnodejs.ServiceIntrospectionStates.CONTENTS
+);
+
+// $ExpectType boolean
+service.isDestroyed();
 
 // ---- Client ----
 // $ExpectType Client<"example_interfaces/srv/AddTwoInts">
@@ -255,6 +286,15 @@ client.isServiceServerAvailable();
 
 // $ExpectType Promise<boolean>
 client.waitForService();
+
+client.configureIntrospection(
+  node.getClock(),
+  rclnodejs.Node.getDefaultOptions() as rclnodejs.QoS,
+  rclnodejs.ServiceIntrospectionStates.CONTENTS
+);
+
+// $ExpectType boolean
+client.isDestroyed();
 
 // ---- Timer ----
 // ExpectType rclnodejs.TimerRequestCallback

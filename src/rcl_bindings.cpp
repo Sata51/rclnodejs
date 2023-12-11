@@ -36,6 +36,11 @@
 #include <rosidl_generator_c/string_functions.h>
 #endif
 
+#if ROS_VERSION > 2205
+#include <rcl/service_introspection.h>
+#endif
+
+#include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -652,6 +657,8 @@ NAN_METHOD(CreateSubscription) {
       *Nan::Utf8String(info[3]->ToString(currentContent).ToLocalChecked()));
   std::string topic(
       *Nan::Utf8String(info[4]->ToString(currentContent).ToLocalChecked()));
+  v8::Local<v8::Object> options =
+      info[5]->ToObject(currentContent).ToLocalChecked();
 
   rcl_subscription_t* subscription =
       reinterpret_cast<rcl_subscription_t*>(malloc(sizeof(rcl_subscription_t)));
@@ -659,11 +666,74 @@ NAN_METHOD(CreateSubscription) {
 
   rcl_subscription_options_t subscription_ops =
       rcl_subscription_get_default_options();
-  auto qos_profile = GetQoSProfile(info[5]);
 
+  v8::Local<v8::Value> qos =
+      Nan::Get(options, Nan::New("qos").ToLocalChecked()).ToLocalChecked();
+  auto qos_profile = GetQoSProfile(qos);
   if (qos_profile) {
     subscription_ops.qos = *qos_profile;
   }
+
+#if ROS_VERSION >= 2205  // 2205 => Humble+
+  if (Nan::Has(options, Nan::New("contentFilter").ToLocalChecked())
+          .FromMaybe(false)) {
+    // configure content-filter
+    v8::MaybeLocal<v8::Value> contentFilterVal =
+        Nan::Get(options, Nan::New("contentFilter").ToLocalChecked());
+
+    if (!Nan::Equals(contentFilterVal.ToLocalChecked(), Nan::Undefined())
+             .ToChecked()) {
+      v8::Local<v8::Object> contentFilter = contentFilterVal.ToLocalChecked()
+                                                ->ToObject(currentContent)
+                                                .ToLocalChecked();
+
+      // expression property is required
+      std::string expression(*Nan::Utf8String(
+          Nan::Get(contentFilter, Nan::New("expression").ToLocalChecked())
+              .ToLocalChecked()
+              ->ToString(currentContent)
+              .ToLocalChecked()));
+
+      // parameters property (string[]) is optional
+      int argc = 0;
+      char** argv = nullptr;
+
+      if (Nan::Has(contentFilter, Nan::New("parameters").ToLocalChecked())
+              .FromMaybe(false)) {
+        v8::Local<v8::Array> jsArgv = v8::Local<v8::Array>::Cast(
+            Nan::Get(contentFilter, Nan::New("parameters").ToLocalChecked())
+                .ToLocalChecked());
+        argc = jsArgv->Length();
+        if (argc > 0) {
+          argv = reinterpret_cast<char**>(malloc(argc * sizeof(char*)));
+          for (int i = 0; i < argc; i++) {
+            Nan::MaybeLocal<v8::Value> jsElement = Nan::Get(jsArgv, i);
+            Nan::Utf8String utf8_arg(jsElement.ToLocalChecked());
+            int len = utf8_arg.length() + 1;
+            argv[i] = reinterpret_cast<char*>(malloc(len * sizeof(char*)));
+            snprintf(argv[i], len, "%s", *utf8_arg);
+          }
+        }
+      }
+
+      rcl_ret_t ret = rcl_subscription_options_set_content_filter_options(
+          expression.c_str(), argc, (const char**)argv, &subscription_ops);
+
+      if (ret != RCL_RET_OK) {
+        Nan::ThrowError(rcl_get_error_string().str);
+        rcl_reset_error();
+      }
+
+      if (argc) {
+        for (int i = 0; i < argc; i++) {
+          free(argv[i]);
+        }
+        free(argv);
+      }
+    }
+  }
+
+#endif
 
   const rosidl_message_type_support_t* ts =
       GetMessageTypeSupport(package_name, message_sub_folder, message_name);
@@ -687,6 +757,121 @@ NAN_METHOD(CreateSubscription) {
   } else {
     Nan::ThrowError(GetErrorMessageAndClear().c_str());
   }
+}
+
+NAN_METHOD(HasContentFilter) {
+#if ROS_VERSION < 2205  // 2205 => Humble+
+  info.GetReturnValue().Set(Nan::False());
+  return;
+#else
+
+  RclHandle* subscription_handle = RclHandle::Unwrap<RclHandle>(
+      Nan::To<v8::Object>(info[0]).ToLocalChecked());
+  rcl_subscription_t* subscription =
+      reinterpret_cast<rcl_subscription_t*>(subscription_handle->ptr());
+
+  bool is_valid = rcl_subscription_is_cft_enabled(subscription);
+  info.GetReturnValue().Set(Nan::New(is_valid));
+#endif
+}
+
+NAN_METHOD(SetContentFilter) {
+#if ROS_VERSION < 2205  // 2205 => Humble+
+  info.GetReturnValue().Set(Nan::False());
+  return;
+#else
+  v8::Local<v8::Context> currentContext = Nan::GetCurrentContext();
+  RclHandle* subscription_handle = RclHandle::Unwrap<RclHandle>(
+      Nan::To<v8::Object>(info[0]).ToLocalChecked());
+  rcl_subscription_t* subscription =
+      reinterpret_cast<rcl_subscription_t*>(subscription_handle->ptr());
+
+  v8::Local<v8::Object> contentFilter =
+      info[1]->ToObject(currentContext).ToLocalChecked();
+
+  Nan::MaybeLocal<v8::Value> jsExpression =
+      Nan::Get(contentFilter, Nan::New("expression").ToLocalChecked());
+  Nan::Utf8String utf8_arg(jsExpression.ToLocalChecked());
+  int len = utf8_arg.length() + 1;
+  char* expression = reinterpret_cast<char*>(malloc(len * sizeof(char*)));
+  snprintf(expression, len, "%s", *utf8_arg);
+
+  // parameters property (string[]) is optional
+  int argc = 0;
+  char** argv = nullptr;
+
+  if (Nan::Has(contentFilter, Nan::New("parameters").ToLocalChecked())
+          .FromMaybe(false)) {
+    v8::Local<v8::Array> jsArgv = v8::Local<v8::Array>::Cast(
+        Nan::Get(contentFilter, Nan::New("parameters").ToLocalChecked())
+            .ToLocalChecked());
+    argc = jsArgv->Length();
+    if (argc > 0) {
+      argv = reinterpret_cast<char**>(malloc(argc * sizeof(char*)));
+      for (int i = 0; i < argc; i++) {
+        Nan::MaybeLocal<v8::Value> jsElement = Nan::Get(jsArgv, i);
+        Nan::Utf8String utf8_arg(jsElement.ToLocalChecked());
+        int len = utf8_arg.length() + 1;
+        argv[i] = reinterpret_cast<char*>(malloc(len * sizeof(char*)));
+        snprintf(argv[i], len, "%s", *utf8_arg);
+      }
+    }
+  }
+
+  // create ctf options
+  rcl_subscription_content_filter_options_t options =
+      rcl_get_zero_initialized_subscription_content_filter_options();
+
+  THROW_ERROR_IF_NOT_EQUAL(RCL_RET_OK,
+                           rcl_subscription_content_filter_options_set(
+                               subscription,
+                               expression,  // expression.c_str(),
+                               argc, (const char**)argv, &options),
+                           rcl_get_error_string().str);
+
+  THROW_ERROR_IF_NOT_EQUAL(
+      RCL_RET_OK, rcl_subscription_set_content_filter(subscription, &options),
+      rcl_get_error_string().str);
+
+  if (argc) {
+    free(expression);
+
+    for (int i = 0; i < argc; i++) {
+      free(argv[i]);
+    }
+    free(argv);
+  }
+
+  info.GetReturnValue().Set(Nan::True());
+#endif
+}
+
+NAN_METHOD(ClearContentFilter) {
+#if ROS_VERSION < 2205  // 2205 => Humble+
+  info.GetReturnValue().Set(Nan::False());
+  return;
+#else
+  RclHandle* subscription_handle = RclHandle::Unwrap<RclHandle>(
+      Nan::To<v8::Object>(info[0]).ToLocalChecked());
+  rcl_subscription_t* subscription =
+      reinterpret_cast<rcl_subscription_t*>(subscription_handle->ptr());
+
+  // create ctf options
+  rcl_subscription_content_filter_options_t options =
+      rcl_get_zero_initialized_subscription_content_filter_options();
+
+  THROW_ERROR_IF_NOT_EQUAL(
+      RCL_RET_OK,
+      rcl_subscription_content_filter_options_init(
+          subscription, "", 0, (const char**)nullptr, &options),
+      rcl_get_error_string().str);
+
+  THROW_ERROR_IF_NOT_EQUAL(
+      RCL_RET_OK, rcl_subscription_set_content_filter(subscription, &options),
+      rcl_get_error_string().str);
+
+  info.GetReturnValue().Set(Nan::True());
+#endif
 }
 
 NAN_METHOD(CreatePublisher) {
@@ -938,6 +1123,68 @@ NAN_METHOD(SendResponse) {
   THROW_ERROR_IF_NOT_EQUAL(rcl_send_response(service, header, buffer),
                            RCL_RET_OK, rcl_get_error_string().str);
 }
+
+#if ROS_VERSION > 2205  // 2205 == Humble
+NAN_METHOD(ConfigureServiceIntrospection) {
+  v8::Local<v8::Context> currentContent = Nan::GetCurrentContext();
+
+  RclHandle* node_handle = RclHandle::Unwrap<RclHandle>(
+      Nan::To<v8::Object>(info[1]).ToLocalChecked());
+  rcl_node_t* node = reinterpret_cast<rcl_node_t*>(node_handle->ptr());
+
+  rcl_clock_t* clock = reinterpret_cast<rcl_clock_t*>(
+      RclHandle::Unwrap<RclHandle>(
+          Nan::To<v8::Object>(info[2]).ToLocalChecked())
+          ->ptr());
+
+  std::string interface_name(
+      *Nan::Utf8String(info[3]->ToString(currentContent).ToLocalChecked()));
+  std::string package_name(
+      *Nan::Utf8String(info[4]->ToString(currentContent).ToLocalChecked()));
+  const rosidl_service_type_support_t* ts =
+      GetServiceTypeSupport(package_name, interface_name);
+
+  if (ts) {
+    rcl_publisher_options_t publisher_ops = rcl_publisher_get_default_options();
+    auto qos_profile = GetQoSProfile(info[5]);
+    if (qos_profile) {
+      publisher_ops.qos = *qos_profile;
+    }
+
+    rcl_service_introspection_state_t state =
+        static_cast<rcl_service_introspection_state_t>(
+            Nan::To<uint32_t>(info[6]).ToChecked());
+
+    bool configureForService = Nan::To<bool>(info[7]).FromJust();
+
+    if (configureForService) {
+      RclHandle* service_handle = RclHandle::Unwrap<RclHandle>(
+          Nan::To<v8::Object>(info[0]).ToLocalChecked());
+      rcl_service_t* service =
+          reinterpret_cast<rcl_service_t*>(service_handle->ptr());
+
+      THROW_ERROR_IF_NOT_EQUAL(
+          rcl_service_configure_service_introspection(service, node, clock, ts,
+                                                      publisher_ops, state),
+          RCL_RET_OK, rcl_get_error_string().str);
+
+    } else {
+      RclHandle* client_handle = RclHandle::Unwrap<RclHandle>(
+          Nan::To<v8::Object>(info[0]).ToLocalChecked());
+      rcl_client_t* client =
+          reinterpret_cast<rcl_client_t*>(client_handle->ptr());
+
+      THROW_ERROR_IF_NOT_EQUAL(
+          rcl_client_configure_service_introspection(client, node, clock, ts,
+                                                     publisher_ops, state),
+          RCL_RET_OK, rcl_get_error_string().str);
+    }
+
+  } else {
+    Nan::ThrowError(GetErrorMessageAndClear().c_str());
+  }
+}
+#endif
 
 NAN_METHOD(ValidateFullTopicName) {
   v8::Local<v8::Context> currentContent = Nan::GetCurrentContext();
@@ -1314,17 +1561,22 @@ NAN_METHOD(CreateArrayBufferFromAddress) {
   char* addr = reinterpret_cast<char*>(result);
   int32_t length = Nan::To<int32_t>(info[1]).FromJust();
 
-  // We will create an ArrayBuffer with mode of
-  // ArrayBufferCreationMode::kInternalized and copy data starting from |addr|,
-  // thus the memory block will be collected by the garbage collector.
-#if NODE_MAJOR_VERSION <= 12
+  static_assert(NODE_MAJOR_VERSION > 12, "nodejs version must > 12");
+#if (NODE_RUNTIME_ELECTRON && NODE_MODULE_VERSION >= 109)
+  // Because V8 sandboxed pointers was enabled since Electron 21, we have to
+  // make a deep copy for Electron 21 and up.
+  // See more details: https://www.electronjs.org/blog/v8-memory-cage
   v8::Local<v8::ArrayBuffer> array_buffer =
-      v8::ArrayBuffer::New(v8::Isolate::GetCurrent(), addr, length,
-                           v8::ArrayBufferCreationMode::kInternalized);
+      v8::ArrayBuffer::New(v8::Isolate::GetCurrent(), length);
+  memcpy(array_buffer->Data(), addr, length);
+  free(addr);
 #else
-  std::unique_ptr<v8::BackingStore> backing =
-      v8::ArrayBuffer::NewBackingStore(v8::Isolate::GetCurrent(), length);
-  memcpy(backing->Data(), addr, length);
+  // For nodejs > 12 or electron < 21, we will create a new `BackingStore` and
+  // take over the ownership of `addr`.
+  std::unique_ptr<v8::BackingStore> backing = v8::ArrayBuffer::NewBackingStore(
+      addr, length,
+      [](void* data, size_t length, void* deleter_data) { free(data); },
+      nullptr);
   auto array_buffer =
       v8::ArrayBuffer::New(v8::Isolate::GetCurrent(), std::move(backing));
 #endif
@@ -1782,6 +2034,9 @@ std::vector<BindingMethod> binding_methods = {
     {"getRosTimeOverrideIsEnabled", GetRosTimeOverrideIsEnabled},
     {"rclTake", RclTake},
     {"createSubscription", CreateSubscription},
+    {"hasContentFilter", HasContentFilter},
+    {"setContentFilter", SetContentFilter},
+    {"clearContentFilter", ClearContentFilter},
     {"createPublisher", CreatePublisher},
     {"publish", Publish},
     {"getTopic", GetTopic},
@@ -1822,6 +2077,11 @@ std::vector<BindingMethod> binding_methods = {
     {"serviceServerIsAvailable", ServiceServerIsAvailable},
     {"publishRawMessage", PublishRawMessage},
     {"rclTakeRaw", RclTakeRaw},
-    {"", nullptr}};
+    {"", nullptr}
+#if ROS_VERSION > 2205  // 2205 == Humble
+    ,
+    {"configureServiceIntrospection", ConfigureServiceIntrospection}
+#endif
+};
 
 }  // namespace rclnodejs

@@ -15,6 +15,7 @@
 'use strict';
 
 const DistroUtils = require('./lib/distro.js');
+const RMWUtils = require('./lib/rmw.js');
 const { Clock, ROSClock } = require('./lib/clock.js');
 const ClockType = require('./lib/clock_type.js');
 const compareVersions = require('compare-versions');
@@ -51,6 +52,7 @@ const {
   getActionServerNamesAndTypesByNode,
   getActionNamesAndTypes,
 } = require('./lib/action/graph.js');
+const ServiceIntrospectionStates = require('./lib/service_introspection.js');
 
 /**
  * Get the version of the generator that was used for the currently present interfaces.
@@ -136,8 +138,14 @@ let rcl = {
   /** {@link QoS} class */
   QoS: QoS,
 
+  /** {@link RMWUtils} */
+  RMWUtils: RMWUtils,
+
   /** {@link ROSClock} class */
   ROSClock: ROSClock,
+
+  /** {@link ServiceIntrospectionStates} */
+  ServiceIntrospectionStates: ServiceIntrospectionStates,
 
   /** {@link Time} class */
   Time: Time,

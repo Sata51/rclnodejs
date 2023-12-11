@@ -31,15 +31,16 @@ declare module "rclnodejs" {
 const path = require('path');
 const fs = require('fs');
 const loader = require('../lib/interface_loader.js');
+const pkgFilters = require('../rosidl_gen/filter.js');
 
 async function generateAll() {
   // load pkg and interface info (msgs and srvs)
   const generatedPath = path.join(__dirname, '../generated/');
   const pkgInfos = getPkgInfos(generatedPath);
 
-  // write message.d.ts file
-  const messagesFilePath = path.join(__dirname, '../types/interfaces.d.ts');
-  const fd = fs.openSync(messagesFilePath, 'w');
+  // write interfaces.d.ts file
+  const interfacesFilePath = path.join(__dirname, '../types/interfaces.d.ts');
+  const fd = fs.openSync(interfacesFilePath, 'w');
   savePkgInfoAsTSD(pkgInfos, fd);
   await wait(500); // hack to avoid random segfault
   fs.closeSync(fd);
@@ -63,7 +64,14 @@ function getPkgInfos(rootDir) {
 
     for (let filename of files) {
       const typeClass = fileName2Typeclass(filename);
-      if (!typeClass.type) continue;
+      if (
+        !typeClass.type ||
+        pkgFilters.matchesAny({
+          pkgName: typeClass.package,
+          interfaceName: typeClass.name,
+        })
+      )
+        continue;
 
       const rosInterface = loader.loadInterface(typeClass);
 
@@ -227,7 +235,9 @@ function saveMsgAsTSD(rosMsgInterface, fd) {
     fd,
     `      export interface ${rosMsgInterface.type().interfaceName} {\n`
   );
-  const useSamePkg = isInternalActionMsgInterface(rosMsgInterface);
+  const useSamePkg =
+    isInternalActionMsgInterface(rosMsgInterface) ||
+    isInternalServiceEventMsgInterface(rosMsgInterface);
   saveMsgFieldsAsTSD(rosMsgInterface, fd, 8, ';', '', useSamePkg);
   fs.writeSync(fd, '      }\n');
 }
@@ -262,7 +272,6 @@ function saveMsgFieldsAsTSD(
       useSamePackageSubFolder && field.type.pkgName === type.pkgName
         ? type.subFolder
         : 'msg';
-
     let fieldType = fieldType2JSName(field, subFolder);
     let tp = field.type.isPrimitiveType ? '' : typePrefix;
     if (typePrefix === 'rclnodejs.') {
@@ -338,13 +347,6 @@ function isMsgInterface(rosInterface) {
   return rosInterface.hasOwnProperty('ROSMessageDef');
 }
 
-function isServiceMsgInterface(rosMsgInterface) {
-  if (!isMsgInterface(rosMsgInterface)) return false;
-
-  let name = rosMsgInterface.type().interfaceName;
-  return name.endsWith('_Request') || name.endsWith('_Response');
-}
-
 function isInternalActionMsgInterface(rosMsgInterface) {
   let name = rosMsgInterface.type().interfaceName;
   return (
@@ -353,6 +355,15 @@ function isInternalActionMsgInterface(rosMsgInterface) {
     name.endsWith('_SendGoal_Response') ||
     name.endsWith('_GetResult_Request') ||
     name.endsWith('_GetResult_Response')
+  );
+}
+
+function isInternalServiceEventMsgInterface(rosMsgInterface) {
+  let name = rosMsgInterface.type().interfaceName;
+  let subFolder = rosMsgInterface.type().subFolder;
+  return (
+    (subFolder == 'srv' || subFolder == 'action') 
+    && name.endsWith('_Event')
   );
 }
 

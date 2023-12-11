@@ -19,6 +19,7 @@ const fse = require('fs-extra');
 const path = require('path');
 const parser = require('../rosidl_parser/rosidl_parser.js');
 const actionMsgs = require('./action_msgs.js');
+const DistroUtils = require('../lib/distro.js');
 
 dot.templateSettings.strip = false;
 dot.log = process.env.RCLNODEJS_LOG_VERBOSE || false;
@@ -30,12 +31,23 @@ function removeEmptyLines(str) {
   return str.replace(/^\s*\n/gm, '');
 }
 
+/**
+ * Output generated code to disk. Do not overwrite
+ * an existing file. If file already exists do nothing.
+ * @param {string} dir
+ * @param {string} fileName
+ * @param {string} code
+ */
 async function writeGeneratedCode(dir, fileName, code) {
   await fse.mkdirs(dir);
   await fse.writeFile(path.join(dir, fileName), code);
 }
 
-function generateServiceJSStruct(serviceInfo, dir) {
+async function generateServiceJSStruct(
+  serviceInfo,
+  dir,
+  isActionService = true
+) {
   dir = path.join(dir, `${serviceInfo.pkgName}`);
   const fileName =
     serviceInfo.pkgName +
@@ -44,10 +56,70 @@ function generateServiceJSStruct(serviceInfo, dir) {
     '__' +
     serviceInfo.interfaceName +
     '.js';
-  const generatedCode = removeEmptyLines(
+  const generatedSrvCode = removeEmptyLines(
     dots.service({ serviceInfo: serviceInfo })
   );
-  return writeGeneratedCode(dir, fileName, generatedCode);
+
+  // We are going to only generate the service JavaScript file if it meets one
+  // of the followings:
+  // 1. It's a action's request/response service.
+  // 2. For pre-Humble ROS 2 releases, because it doesn't support service
+  //    introspection.
+  if (
+    isActionService ||
+    DistroUtils.getDistroId() <= DistroUtils.getDistroId('humble')
+  ) {
+    return writeGeneratedCode(dir, fileName, generatedSrvCode);
+  }
+
+  return writeGeneratedCode(dir, fileName, generatedSrvCode).then(() => {
+    return generateServiceEventMsg(serviceInfo, dir);
+  });
+}
+
+async function generateServiceEventMsg(serviceInfo, dir) {
+  const fileName = serviceInfo.interfaceName + '.msg';
+  const generatedEvent = removeEmptyLines(
+    dots.service_event({ serviceInfo: serviceInfo })
+  );
+
+  return writeGeneratedCode(dir, fileName, generatedEvent).then(() => {
+    serviceInfo.interfaceName += '_Event';
+    serviceInfo.filePath = path.join(dir, fileName);
+    return generateServiceEventJSStruct(serviceInfo, dir);
+  });
+}
+
+async function generateServiceEventJSStruct(msgInfo, dir) {
+  const spec = await parser.parseMessageFile(msgInfo.pkgName, msgInfo.filePath);
+
+  // Remove the `.msg` files generated in `generateServiceEventMsg()` to avoid
+  // being found later.
+  fse.removeSync(msgInfo.filePath);
+  const eventFileName =
+    msgInfo.pkgName +
+    '__' +
+    msgInfo.subFolder +
+    '__' +
+    msgInfo.interfaceName +
+    '.js';
+
+  // Set `msgInfo.isServiceEvent` to true, so when generating the JavaScript
+  // message files for the service event leveraging message.dot, it will use
+  // "__srv__" to require the JS files for the request/response of a specific
+  // service, e.g.,
+  // const AddTwoInts_RequestWrapper = require('../../generated/example_interfaces/example_interfaces__srv__AddTwoInts_Request.js');
+  // const AddTwoInts_ResponseWrapper = require('../../generated/example_interfaces/example_interfaces__srv__AddTwoInts_Response.js');
+  msgInfo.isServiceEvent = true;
+  const generatedCode = removeEmptyLines(
+    dots.message({
+      messageInfo: msgInfo,
+      spec: spec,
+      json: JSON.stringify(spec, null, '  '),
+    })
+  );
+
+  return writeGeneratedCode(dir, eventFileName, generatedCode);
 }
 
 async function generateMessageJSStruct(messageInfo, dir) {
@@ -231,15 +303,19 @@ async function generateActionJSStruct(actionInfo, dir) {
 }
 
 async function generateJSStructFromIDL(pkg, dir) {
-  await Promise.all([
-    ...pkg.messages.map((messageInfo) =>
-      generateMessageJSStruct(messageInfo, dir)
-    ),
-    ...pkg.services.map((serviceInfo) =>
-      generateServiceJSStruct(serviceInfo, dir)
-    ),
-    ...pkg.actions.map((actionInfo) => generateActionJSStruct(actionInfo, dir)),
-  ]);
+  const results = [];
+  pkg.messages.forEach((messageInfo) => {
+    results.push(generateMessageJSStruct(messageInfo, dir));
+  });
+  pkg.services.forEach((serviceInfo) => {
+    results.push(
+      generateServiceJSStruct(serviceInfo, dir, /*isActionService=*/ false)
+    );
+  });
+  pkg.actions.forEach((actionInfo) => {
+    results.push(generateActionJSStruct(actionInfo, dir));
+  });
+  await Promise.all(results);
 }
 
 module.exports = generateJSStructFromIDL;

@@ -9,6 +9,7 @@
   },
   'variables': {
     'ros_version': '<!(node scripts/ros_distro.js)',
+    'runtime%': 'node',
   },
   'targets': [
     {
@@ -82,11 +83,14 @@
                     "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/:/g, '/include/rosidl_typesupport_interface/ ') + '/include/rosidl_typesupport_interface/')\")",
                     "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/:/g, '/include/rcl_action/ ') + '/include/rcl_action/')\")",
                     "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/:/g, '/include/action_msgs/ ') + '/include/action_msgs/')\")",
+                    "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/:/g, '/include/service_msgs/ ') + '/include/service_msgs/')\")",
                     "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/:/g, '/include/unique_identifier_msgs/ ') + '/include/unique_identifier_msgs/')\")",
                     "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/:/g, '/include/builtin_interfaces/ ') + '/include/builtin_interfaces/')\")",
                     "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/:/g, '/include/rcl_lifecycle/ ') + '/include/rcl_lifecycle/')\")",
                     "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/:/g, '/include/lifecycle_msgs/ ') + '/include/lifecycle_msgs/')\")",
                     "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/:/g, '/include/rosidl_runtime_c/ ') + '/include/rosidl_runtime_c/')\")",
+                    "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/:/g, '/include/rosidl_dynamic_typesupport/ ') + '/include/rosidl_dynamic_typesupport/')\")",
+                    "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/:/g, '/include/type_description_interfaces/ ') + '/include/type_description_interfaces/')\")",
                   ],
                 }
               ],
@@ -129,10 +133,13 @@
                     "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/;/g, '/include/rosidl_typesupport_interface ').replace(/\\\/g, '/') + '/include/rosidl_typesupport_interface')\")",
                     "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/;/g, '/include/rcl_action ').replace(/\\\/g, '/') + '/include/rcl_action')\")",
                     "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/;/g, '/include/action_msgs ').replace(/\\\/g, '/') + '/include/action_msgs')\")",
+                    "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/;/g, '/include/service_msgs ').replace(/\\\/g, '/') + '/include/service_msgs')\")",
                     "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/;/g, '/include/unique_identifier_msgs ').replace(/\\\/g, '/') + '/include/unique_identifier_msgs')\")",
                     "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/;/g, '/include/builtin_interfaces ').replace(/\\\/g, '/') + '/include/builtin_interfaces')\")",
                     "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/;/g, '/include/rcl_lifecycle ').replace(/\\\/g, '/') + '/include/rcl_lifecycle')\")",
                     "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/;/g, '/include/lifecycle_msgs ').replace(/\\\/g, '/') + '/include/lifecycle_msgs')\")",
+                    "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/;/g, '/include/rosidl_dynamic_typesupport ').replace(/\\\/g, '/') + '/include/rosidl_dynamic_typesupport')\")",
+                    "<!@(node -e \"console.log(process.env.AMENT_PREFIX_PATH.replace(/;/g, '/include/type_description_interfaces/ ').replace(/\\\/g, '/') + '/include/type_description_interfaces/')\")",
                   ],
                 }
               ]
@@ -170,7 +177,10 @@
               '-lrosidl_runtime_c'
             ]
           }
-        ]
+        ],
+        ['runtime=="electron"', {
+          "defines": ["NODE_RUNTIME_ELECTRON=1"]
+        }],
       ]
     }
   ]
